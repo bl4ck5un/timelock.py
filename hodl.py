@@ -49,6 +49,7 @@ def spend_hodl_redeemScript(privkey, nLockTime, unsigned_tx, n):
     """
     redeemScript = hodl_redeemScript(privkey, nLockTime)
     sighash = SignatureHash(redeemScript, unsigned_tx, n, SIGHASH_ALL)
+    logging.debug('sighash: %s' % b2x(sighash))
     sig = privkey.sign(sighash) + bytes([SIGHASH_ALL])
     return CScript([sig, redeemScript])
 
@@ -81,6 +82,9 @@ def spend_command(args):
 
     redeemScript = hodl_redeemScript(args.privkey, args.nLockTime)
     scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
+
+    logging.debug('redeemScript: %s' % b2x(redeemScript))
+    logging.debug('scriptPubKey: %s' % b2x(scriptPubKey))
 
     proxy = bitcoin.rpc.Proxy()
 
@@ -122,6 +126,9 @@ def spend_command(args):
     if feerate <= 0:
         feerate = 10000
     fees = int(tx_size / 1000 * feerate)
+
+    print('fee: %f' % fees)
+    print('amount: %f' % (sum_in - fees))
 
     unsigned_tx = CTransaction([CTxIn(outpoint, nSequence=0) for outpoint, prevout in prevouts],
                                [CTxOut(sum_in - fees,
