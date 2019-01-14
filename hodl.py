@@ -122,7 +122,8 @@ def spend_command(args):
                4                     # nLockTime field
               )
 
-    feerate = int(proxy._call('estimatefee', 1) * COIN) # satoshi's per KB
+    # feerate = int(proxy._call('estimatesmartfee', 1) * COIN) # satoshi's per KB
+    feerate = 0
     if feerate <= 0:
         feerate = 10000
     fees = int(tx_size / 1000 * feerate)
