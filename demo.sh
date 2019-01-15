@@ -8,13 +8,16 @@ which bitcoin-cli || {
     exit -1
 }
 
+if [[ -e $(pgrep bitcoin) ]]; then
+    echo "Please start bitcoind or bitcoin-qt prior to running this script."
+fi
+
 echo "Using private key ${private_key}"
 
 time=$(date +%s)
-timelock=$(($time + 60))
+timelock=$(($time + 10))
 
 echo "Creating a P2SH address with a timelock ${timelock}"
-echo python3 hodl.py -t $private_key $timelock create
 
 p2shaddr=$(python3 hodl.py -t $private_key $timelock create)
 
@@ -22,8 +25,8 @@ echo "address created: $p2shaddr"
 
 sleep 2
 
-echo "sending 50 BTC -> $p2shaddr"
-p2shtxid=$(bitcoin-cli sendtoaddress $p2shaddr 50)
+echo "sending 10 BTC -> $p2shaddr"
+p2shtxid=$(bitcoin-cli sendtoaddress $p2shaddr 10)
 
 echo "txid: $p2shtxid"
 
@@ -32,16 +35,19 @@ sleep 1 && rawtx=$(bitcoin-cli getrawtransaction $p2shtxid)
 
 echo "Now let's spend the newly created UTXO"
 
-python3 hodl.py -t $private_key $timelock spend $p2shtxid:0 ${address} 2>&1
+python3 hodl.py -vt $private_key $timelock spend $p2shtxid:0 ${address} 2>&1
 # if outpoint 0 is invalid, then try outpoint 1
 if [[ $? != 0 ]]; then
     outpoint=1
-    python3 hodl.py -t $private_key $timelock spend $p2shtxid:1 ${address} 2>&1
+    python3 hodl.py -vt $private_key $timelock spend $p2shtxid:1 ${address} 2>&1
 else
     outpoint=0
 fi
 
-echo ""
+echo "Done."
+
+print_cpp()
+{
 cat << EOF
 //===PASTE THIS INTO C++ CODE====
 const string sgxPrivKey = "$private_key";
@@ -54,3 +60,12 @@ const string rawPrevTxP2SH = "$rawtx";
 // python3 hodl.py -vt $private_key $timelock spend $p2shtxid:$outpoint $address
 //===END OF PASTE THIS INTO C++ CODE====
 EOF
+}
+
+print_rust()
+{
+    echo "=== To generate the same spending transaction in p2sh-examples (rust), use the following command ==="
+    echo ./target/debug/cltv --locktime $timelock --secret $private_key spend --address $address --tx $rawtx
+}
+
+print_rust
