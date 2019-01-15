@@ -48,6 +48,7 @@ def spend_hodl_redeemScript(privkey, nLockTime, unsigned_tx, n):
     Returns the complete scriptSig
     """
     redeemScript = hodl_redeemScript(privkey, nLockTime)
+    logging.debug('redeemScript: %s' % b2x(redeemScript))
     sighash = SignatureHash(redeemScript, unsigned_tx, n, SIGHASH_ALL)
     logging.debug('sighash: %s' % b2x(sighash))
     sig = privkey.sign(sighash) + bytes([SIGHASH_ALL])
@@ -122,8 +123,13 @@ def spend_command(args):
                4                     # nLockTime field
               )
 
-    # feerate = int(proxy._call('estimatesmartfee', 1) * COIN) # satoshi's per KB
-    feerate = 0
+    estimated_fee = proxy._call('estimatesmartfee', 1)
+
+    if 'errors' in estimated_fee:
+        print(estimated_fee['errors'])
+        raise
+
+    feerate = int(estimated_fee['feerate'] * COIN) # satoshi's per KB
     if feerate <= 0:
         feerate = 10000
     fees = int(tx_size / 1000 * feerate)
