@@ -37,8 +37,10 @@ change). Create a spending transaction (suppose the target address is
 python3 hodl.py -t $private_key $timelock spend 7c7e40a94c4bb52f51e78299e6b504323babd0245aaaf2cff288c4d05c1180dc:1 2MtntiYA2DtFEmTV1dkfMVT4GVg4MYxN2pX # the last piece is the target address.
 ```
 
+> Note: Make sure the UTXO is confirmed. Otherwise you might get `non-final` error.
+
 Finally, send the raw transaction to Bitcoin by `bitcoin-cli sendrawtransaction hexstring`.
-One of my spending tx can be examined here `a4f9e5cb8a0a283da33e226c2131e36ed50da362df8822422fdb26f659bb4033`.
+One of my spending tx can be examined here [`a4f9e5cb8a0a283da33e226c2131e36ed50da362df8822422fdb26f659bb4033`](https://live.blockcypher.com/btc-testnet/tx/a4f9e5cb8a0a283da33e226c2131e36ed50da362df8822422fdb26f659bb4033/).
 
 Tips
 ====
