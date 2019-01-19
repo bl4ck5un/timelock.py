@@ -127,9 +127,10 @@ def spend_command(args):
 
     if 'errors' in estimated_fee:
         print(estimated_fee['errors'])
-        raise
+        feerate = -1
+    else:
+        feerate = int(estimated_fee['feerate'] * COIN) # satoshi's per KB
 
-    feerate = int(estimated_fee['feerate'] * COIN) # satoshi's per KB
     if feerate <= 0:
         feerate = 10000
     fees = int(tx_size / 1000 * feerate)

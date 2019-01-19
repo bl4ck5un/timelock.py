@@ -25,8 +25,7 @@ get fund from one of the faucets. For local testnet (regtest), you can use
 `bitcoin-cli -regtest generate 101` to get 50 BTC.
 
 ```
-bitcoin-cli sendtoaddress 2N7GnzMovd5tq1DpMQXDx6KfuGW2m6RbXpN 0.001234
-7c7e40a94c4bb52f51e78299e6b504323babd0245aaaf2cff288c4d05c1180dc # txid
+txid=$(bitcoin-cli sendtoaddress 2N7GnzMovd5tq1DpMQXDx6KfuGW2m6RbXpN 0.001234)
 ```
 
 Then, look up the transaction and determine the P2SH output (the other is the
@@ -34,7 +33,7 @@ change). Create a spending transaction (suppose the target address is
 `2MtntiYA2DtFEmTV1dkfMVT4GVg4MYxN2pX`):
 
 ```
-python3 hodl.py -t $private_key $timelock spend 7c7e40a94c4bb52f51e78299e6b504323babd0245aaaf2cff288c4d05c1180dc:1 2MtntiYA2DtFEmTV1dkfMVT4GVg4MYxN2pX # the last piece is the target address.
+python3 hodl.py -t $private_key $timelock spend $txid:1 2MtntiYA2DtFEmTV1dkfMVT4GVg4MYxN2pX # the last piece is the target address.
 ```
 
 > Note: Make sure the UTXO is confirmed. Otherwise you might get `non-final` error.
