@@ -68,4 +68,5 @@ print_rust()
     echo ./target/debug/cltv --locktime $timelock --secret $private_key spend --address $address --tx $rawtx
 }
 
+print_cpp
 print_rust
