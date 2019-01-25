@@ -132,7 +132,6 @@ def settle_to_single_addr(deposits: List[Deposit], addr: CBitcoinAddress):
 logging.root.setLevel('DEBUG')
 bitcoin.SelectParams('testnet')
 
-proxy = bitcoin.rpc.Proxy()
 
 user_a_seckey = CBitcoinSecret.from_secret_bytes(Hash(b'alice'))
 user_b_seckey = CBitcoinSecret.from_secret_bytes(Hash(b'bob'))
@@ -155,6 +154,8 @@ for ukey in users:
 print("Alice will deposit at: {}".format(params[0].address))
 print("Bob will deposit at: {}".format(params[1].address))
 print("exch's address is at: {}".format(P2PKHBitcoinAddress.from_pubkey(exch_seckey.pub)))
+
+# proxy = bitcoin.rpc.Proxy()
 
 # utxo = proxy.listunspent()
 # print(utxo)
