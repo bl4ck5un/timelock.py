@@ -1,9 +1,9 @@
 from typing import List
 
-import bitcoin
+import bitcoin.rpc
 from bitcoin.wallet import P2PKHBitcoinAddress, P2SHBitcoinAddress, CBitcoinSecret
 from bitcoin.core.key import CPubKey
-from bitcoin.core import Hash, b2x, b2lx, Hash160, COutPoint, COIN, CTransaction, CTxIn, CTxOut
+from bitcoin.core import Hash, b2x, b2lx, lx, x, Hash160, COutPoint, COIN, CTransaction, CTxIn, CTxOut
 from bitcoin.core.script import *
 
 import logging
@@ -55,11 +55,99 @@ def encode_const(N):
         return CScriptOp.encode_op_pushdata(N)
 
 
+def tx_size(nin, nout):
+    return (4 +  # version field
+            2 +  # # of txins
+            nin * 153 +  # txins, including sigs
+            1 +  # # of txouts
+            nout * 34 +  # txout
+            4  # nLockTime field
+            )
+
+
+class OutPointWithTx:
+    def __init__(self, tx_hex, txid, nout):
+        # TODO: test if de-serialization works
+        self.tx = CTransaction.deserialize(x(tx_hex))
+        self.nout = nout
+        self.outpoint = COutPoint(lx(txid), nout)
+
+    @property
+    def prevout(self):
+        return self.tx.vout[self.nout]
+
+
+class LifeSignal:
+    def __init__(self, key1: CPubKey, relative_timeout):
+        """
+        a life signal is a coin that can be spent by key1 immediately or a tmp key after a relative_timeout
+        :param key1:
+        :param relative_timeout:
+        """
+        self._key1 = key1
+        self._key2 = CBitcoinSecret.from_secret_bytes(Hash("tmpsecret".encode()))
+        self._relative_timeout = relative_timeout
+        self._life_signal_amount = 0.0001 * COIN
+
+    @property
+    def redeemScript(self):
+        return CScript([OP_IF, self._key1, OP_CHECKSIG] + [OP_ELSE, self._relative_timeout, OP_NOP3, OP_DROP] + list(
+            pubkey_to_P2PKH_scriptPubkey(self._key2.pub)) + [OP_ENDIF])
+
+    @property
+    def relative_timeout(self):
+        return self._relative_timeout
+
+    def scriptSig_by_key2(self, unsigned_tx: CTransaction, which_to_sign):
+        branch = OP_FALSE
+        sighash = SignatureHash(self.redeemScript, unsigned_tx, which_to_sign, SIGHASH_ALL)
+
+        sig = self._key2.sign(sighash) + bytes([SIGHASH_ALL])
+
+        return CScript([sig, branch, self.redeemScript])
+
+    def generate_life_signal(self, dust_secret: CBitcoinSecret, dust_outpoint: OutPointWithTx, feerate):
+        if dust_outpoint.prevout.scriptPubKey != pubkey_to_P2PKH_scriptPubkey(dust_secret.pub):
+            raise Exception("Outpoint have incorrect scriptPubKey")
+
+        sum_in = dust_outpoint.prevout.nValue
+
+        fees = int(tx_size(1, 2) / 1000 * feerate)
+        refund = sum_in - fees - self._life_signal_amount
+
+        print('fee: %f' % fees)
+        print('amount: %f' % (sum_in - fees))
+
+        redeemScript = self.redeemScript
+
+        unsigned_tx = CTransaction([CTxIn(dust_outpoint.outpoint)],
+                                   [CTxOut(self._life_signal_amount, redeemScript.to_p2sh_scriptPubKey()),
+                                    CTxOut(refund, pubkey_to_P2PKH_scriptPubkey(dust_secret.pub))])
+
+        # spend the dust input
+        sighash = SignatureHash(dust_outpoint.prevout.scriptPubKey, unsigned_tx, 0, SIGHASH_ALL)
+        sig = dust_secret.sign(sighash) + bytes([SIGHASH_ALL])
+        sigScript = CScript([sig, dust_secret.pub])
+
+        signed_input = [CTxIn(unsigned_tx.vin[0].prevout,
+                              sigScript,
+                              nSequence=unsigned_tx.vin[0].nSequence)]
+
+        return CTransaction(
+            signed_input,
+            unsigned_tx.vout,
+            unsigned_tx.nLockTime)
+
+
 class Wallet:
     def __init__(self, users: List[Party], sgx: Party):
         self.users = users
         self.sgx = sgx
         self.relative_timeout = 144  # blocks
+
+        self.life_signals = []
+        for i, _ in enumerate(users):
+            self.life_signals.append(LifeSignal(users[i].pubkey, relative_timeout=10))
 
     @property
     def n_user(self):
@@ -96,67 +184,57 @@ class Wallet:
         sig = seckey_sgx.sign(sighash) + bytes([SIGHASH_ALL])
         return CScript([sig, branch, self.redeemScript])
 
-    def set_dust_outpoint(self, txid, n_out):
-        self.dust_outpoint = COutPoint(txid, n_out)
+    def generate_life_signal(self, dust_outpoint: OutPointWithTx, secret_sgx: CBitcoinSecret, i, feerate):
+        return self.life_signals[i].generate_life_signal(secret_sgx, dust_outpoint, feerate)
 
-    def generate_life_signal(self, secret_sgx: CBitcoinSecret, i, feerate):
-        assert self.dust_outpoint
+    def set_life_signal_outpoint(self, txid: str, n_out):
+        self.life_signal_outpoint = COutPoint(lx(txid), n_out)
+
+    def set_wallet_outopint(self, txid: str, n_out):
+        self.wallet_outpoint = COutPoint(lx(txid), n_out)
+
+    def spend_life_signal_and_update_wallet(self, user_index, secret_sgx):
+        assert self.life_signal_outpoint
+        assert self.wallet_outpoint
 
         try:
-            dust_utxo = proxy.gettxout(self.dust_outpoint)['txout']
+            lifesignal_utxo = proxy.gettxout(self.life_signal_outpoint)['txout']
+            wallet_utxo = proxy.gettxout(self.wallet_outpoint)['txout']
         except IndexError:
-            raise ValueError('Outpoint %s not found' % self.dust_outpoint)
+            raise ValueError('Outpoint %s not found' % self.life_signal_outpoint)
 
-        # FIXME this is wrong. I need to check dust_utxo.scriptPubKey is P2PKH
-        if dust_utxo.scriptPubKey != self.redeemScript.to_p2sh_scriptPubKey():
-            raise Exception("Outpoint have incorrect scriptPubKey")
+        if lifesignal_utxo.scriptPubKey != pubkey_to_P2PKH_scriptPubkey(secret_sgx.pub):
+            raise Exception("SGX can't spend the life signal")
 
-        sum_in = dust_utxo.nValue
+        if wallet_utxo.scriptPubKey != self.scriptPubkey:
+            raise Exception("wallet utxo mismatch")
 
-        tx_size = (4 +  # version field
-                   2 +  # # of txins
-                   153 +  # txins, including sigs
-                   1 +  # # of txouts
-                   34 +  # txout
-                   4  # nLockTime field
-                   )
-
-        fees = int(tx_size / 1000 * feerate)
+        sum_in = lifesignal_utxo.nValue + wallet_utxo.nValue
+        fees = int(tx_size(2, 1) / 1000 * feerate)
 
         print('fee: %f' % fees)
         print('amount: %f' % (sum_in - fees))
 
-        tmp_key = CBitcoinSecret.from_secret_bytes(secrets.token_bytes(32))
+        unsigned_tx = CTransaction([CTxIn(self.life_signal_outpoint, nSequence=self.relative_timeout),
+                                    CTxIn(self.wallet_outpoint)],
+                                   [CTxOut(wallet_utxo.nValue, self.scriptPubkey)])
 
-        life_signal_redeemScript = CScript(
-            [OP_IF, self.users[i].pubkey, OP_CHECKSIG] + [OP_ELSE, self.relative_timeout, OP_NOP3, OP_DROP] + list(
-                pubkey_to_P2PKH_scriptPubkey(tmp_key.pub)) + [OP_ENDIF])
+        # spend the life signal
+        lifesignal_sigScript = self.life_signals[user_index].scriptSig_by_key2(unsigned_tx, 0)
 
-        unsigned_tx = CTransaction([CTxIn(dust_utxo, nSequence=self.relative_timeout)],
-                                   [CTxOut(sum_in - fees, life_signal_redeemScript.to_p2sh_scriptPubKey())])
+        # spend the wallet
+        wallet_sigScript = self.scriptSig_by_sgx(secret_sgx, unsigned_tx, 1)
 
-        # spend the dust input
-        sighash = SignatureHash(dust_utxo.scriptPubKey, unsigned_tx, 0, SIGHASH_ALL)
-        sig = secret_sgx.sign(sighash) + bytes([SIGHASH_ALL])
-        # FIXME double check on this
-        sigScript = CScript([sig])
+        return CTransaction([CTxIn(unsigned_tx.vin[0].prevout, lifesignal_sigScript, unsigned_tx.vin[0].nSequence),
+                             CTxIn(unsigned_tx.vin[1].prevout, wallet_sigScript, unsigned_tx.vin[1].nSequence)],
+                            unsigned_tx.vout,
+                            unsigned_tx.nLockTime)
 
-        signed_input = [CTxIn(unsigned_tx.vin[0].prevout,
-                              sigScript,
-                              nSequence=unsigned_tx.vin[0].nSequence)]
-
-        signed_tx = CTransaction(
-            signed_input,
-            unsigned_tx.vout,
-            unsigned_tx.nLockTime)
-
-        print(b2x(signed_tx.serialize()))
-
-    def accuse(self, secret_sgx: CBitcoinSecret, i, feerate):
+    def accuse(self, dust_outpoint, secret_sgx: CBitcoinSecret, i, feerate):
         assert 0 <= i < self.n_user
-        assert self.dust_outpoint
 
-        life_signal = self.generate_life_signal(secret_sgx, i, feerate)
+        life_signal = self.generate_life_signal(dust_outpoint, secret_sgx, i, feerate)
+        print("life signal tx: {}".format(b2x(life_signal.serialize())))
 
     def __str__(self):
         return "wallet_address={}, script={}".format(self.P2SHAddress, b2x(self.redeemScript)).replace(",", "\t")
@@ -178,5 +256,10 @@ print(sgx)
 w = Wallet(users, sgx)
 print(w)
 
+feerate = 10000
+
+dust_tx_hex = "020000000184b9e9fc7e0de3040d3df835c2f8a1ac603840ba07a2ae91b7349f57b49fee2700000000484730440220633e7218eb0971ec46246dc9a176239563f969ad8f7226a5cc3a90403c868ec002205c01a8e18b5ce5403447adc9a6327b5614624cd086c7347f6e1e0b6fc5d4360c01fdffffff0200ca9a3b000000001976a914567827d4bedca8a476fc0d6ab47dad54ad52379688ac3e196bee0000000017a91457e70919a54efea88b9e222d270fba970e219a8087a5000000"
+dust_outpoint = OutPointWithTx(dust_tx_hex, "b46217251be56c5c3a80d6144eccb3628156b1dfe8a99bd959b29df80c53c8ab", 0)
+
 # try accuse Alice
-w.accuse(0)
+w.accuse(dust_outpoint, sgx_secret, 0, feerate)
