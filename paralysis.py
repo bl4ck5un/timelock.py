@@ -128,7 +128,7 @@ class LifeSignal:
         if dust_outpoint.prevout.scriptPubKey != pubkey_to_P2PKH_scriptPubkey(dust_secret.pub):
             print(b2x(dust_outpoint.prevout.scriptPubKey))
             print(b2x(pubkey_to_P2PKH_scriptPubkey(dust_secret.pub)))
-            raise Exception("Outpoint have incorrect scriptPubKey")
+            raise Exception("Outpoint has incorrect scriptPubKey")
 
         sum_in = dust_outpoint.prevout.nValue
 
