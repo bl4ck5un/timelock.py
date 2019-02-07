@@ -239,9 +239,8 @@ class Wallet:
         print('fee: %f' % fees)
         print('amount: %f' % (sum_in - fees))
 
-        # todo: remove the user from self.scriptPubkey
-        # note: nVersion=2 is required by CSV
         self._remove_user(user_index)
+        # note: nVersion=2 is required by CSV
         unsigned_tx = CTransaction([CTxIn(COutPoint(ls_tx.GetTxid(), nOut_for_ls), nSequence=ls.relative_timeout),
                                     CTxIn(wallet_op.outpoint)],
                                    [CTxOut(wallet_op.prevout.nValue, self.scriptPubkey)],
