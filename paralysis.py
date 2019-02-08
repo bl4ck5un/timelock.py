@@ -166,32 +166,27 @@ class Wallet:
         for i, _ in enumerate(users):
             self._life_signals.append(LifeSignal(users[i].pubkey, relative_timeout=10))
 
-    @property
-    def n_user(self):
-        return len(self._users)
-
-    @property
-    def _redeemScript(self):
+    def _redeemScript(self, exclude_indices=()):
         """
         OP_IF sgxScriptPubkey OP_ELSE N <pubkey1> ... <pubkeyN> N OP_CHECKMULTISIG
         """
+
+        users = [self._users[i] for i in range(len(self._users)) if i not in exclude_indices]
+        n_user = encode_const(len(users))
+
         if_branch = [OP_IF] + list(self._sgx.P2PKHScriptPubkey)
-        else_branch = [OP_ELSE, encode_const(self.n_user)] + [u.pubkey for u in self._users] + [
-            encode_const(self.n_user),
+        else_branch = [OP_ELSE, n_user] + [u.pubkey for u in users] + [
+            n_user,
             OP_CHECKMULTISIG, OP_ENDIF]
 
         return CScript(if_branch + else_branch)
 
-    @property
-    def scriptPubkey(self):
-        return self._redeemScript.to_p2sh_scriptPubKey()
+    def scriptPubkey(self, exclude_indices=()):
+        return self._redeemScript(exclude_indices).to_p2sh_scriptPubKey()
 
     @property
     def P2SHAddress(self):
-        return P2SHBitcoinAddress.from_scriptPubKey(self.scriptPubkey)
-
-    def _remove_user(self, user_index):
-        self._users.pop(user_index)
+        return P2SHBitcoinAddress.from_scriptPubKey(self.scriptPubkey())
 
     def spend_by_all_users(self, list_of_secret_keys: List[CBitcoinSecret]):
         pass
@@ -199,10 +194,10 @@ class Wallet:
     def _scriptSig_by_sgx(self, seckey_sgx: CBitcoinSecret, unsigned_tx, n_in):
         # sgx spends the true branch
         branch = OP_TRUE
-        sighash = SignatureHash(self._redeemScript, unsigned_tx, n_in, SIGHASH_ALL)
+        sighash = SignatureHash(self._redeemScript(), unsigned_tx, n_in, SIGHASH_ALL)
 
         sig = seckey_sgx.sign(sighash) + bytes([SIGHASH_ALL])
-        return CScript([sig, seckey_sgx.pub, branch, self._redeemScript])
+        return CScript([sig, seckey_sgx.pub, branch, self._redeemScript()])
 
     def appeal(self, user_index, user_secret: CBitcoinSecret, lifesignal_op: OutPointWithTx):
         ls = self._life_signals[user_index]
@@ -229,7 +224,7 @@ class Wallet:
         if ls_tx.vout[nOut_for_ls].scriptPubKey != ls.redeemScript.to_p2sh_scriptPubKey():
             raise Exception("SGX can't spend the life signal")
 
-        if wallet_op.prevout.scriptPubKey != self.scriptPubkey:
+        if wallet_op.prevout.scriptPubKey != self.scriptPubkey():
             raise Exception("wallet utxo mismatch")
 
         print('ls value: %f' % ls_tx.vout[nOut_for_ls].nValue)
@@ -239,11 +234,10 @@ class Wallet:
         print('fee: %f' % fees)
         print('amount: %f' % (sum_in - fees))
 
-        self._remove_user(user_index)
         # note: nVersion=2 is required by CSV
         unsigned_tx = CTransaction([CTxIn(COutPoint(ls_tx.GetTxid(), nOut_for_ls), nSequence=ls.relative_timeout),
                                     CTxIn(wallet_op.outpoint)],
-                                   [CTxOut(wallet_op.prevout.nValue, self.scriptPubkey)],
+                                   [CTxOut(wallet_op.prevout.nValue, self.scriptPubkey(exclude_indices=(user_index,)))],
                                    nVersion=2)
 
         # spend the life signal
@@ -261,7 +255,7 @@ class Wallet:
             unsigned_tx.nVersion)
 
     def __str__(self):
-        return "wallet_address={}, script={}".format(self.P2SHAddress, b2x(self._redeemScript)).replace(",", "\t")
+        return "wallet_address={}".format(self.P2SHAddress).replace(",", "\t")
 
 
 # test script
@@ -282,14 +276,15 @@ print(wallet)
 
 feerate = 10000
 
-dust_tx_hex = "020000000001023ae39b3324379dcb2258f42e6270155f8393e5d14976b8bc419f1875ff3b5d890100000017160014ed3947e5a8992aae50d06f7f4375857503791076fdffffffb4fc5d489c3b238d98718b9a3ade94921f7cd4bf9a9e5962594e064fab626fa20200000017160014201b558498b581d9675074287f47482cbd228664fdffffff033c6ff4050000000017a914ebc8580e10c803ebe70d3fdd8ffb5ab2d8269a0b8750c30000000000001976a914567827d4bedca8a476fc0d6ab47dad54ad52379688ac00ca9a3b0000000017a91400593b17f9ff1e272c0086b46ec4161de2e89b4387024730440220371c07b2942339012aabfa70d6ae9bbe1d951db4d5e1952c5c1bd264e443432402201b7d5469eb0252735c64d3361215cd7849d4b38a8655de48d6e3463a8760519f01210387fb76f2352dfcc94ce2fe6b6a5af86c70a07cacd422c9362d99b5827a211b4a0247304402203a928bf0291936697bb9462f5c75431e2fcdb888e904df329aaf53e4942187480220331a0f23cc6055537a2287e34ae974d77705e02580ef4d467f5c82fa8b58789e01210234446fb0f7bc2b53ac063672e15da59a62f029770d83400b9fd5ada38f0fefa9ea000000"
+dust_tx_hex = "02000000000101305b59e3c4fd570247468e723f92fec0e59fa8836155b862a2edd3ef72476013010000001716001457c96285147bf0f667f7b32eb17c4619d7bf39c4fdffffff0250c30000000000001976a914567827d4bedca8a476fc0d6ab47dad54ad52379688ac7c2df1050000000017a914b566c90701c841abd200b9b83274ecd46039a8e6870247304402200896d6255b232221cae6cb1939bd1cb71e13cfb1eb337c00de279aeee143276d0220343eed9b30efdbe2f1b79a5d123485905acae71e91a7b403e3e8b2fedf1a5338012102a4e429c0092ba1640f94bce2462a172284bcf90cd071b67bb4b9f2b9245fb9a928010000"
 dust_outpoint = OutPointWithTx(dust_tx_hex, sgx.P2PKHScriptPubkey)
 
-wallet_deposit_tx_hex = "020000000001023ae39b3324379dcb2258f42e6270155f8393e5d14976b8bc419f1875ff3b5d890100000017160014ed3947e5a8992aae50d06f7f4375857503791076fdffffffb4fc5d489c3b238d98718b9a3ade94921f7cd4bf9a9e5962594e064fab626fa20200000017160014201b558498b581d9675074287f47482cbd228664fdffffff033c6ff4050000000017a914ebc8580e10c803ebe70d3fdd8ffb5ab2d8269a0b8750c30000000000001976a914567827d4bedca8a476fc0d6ab47dad54ad52379688ac00ca9a3b0000000017a91400593b17f9ff1e272c0086b46ec4161de2e89b4387024730440220371c07b2942339012aabfa70d6ae9bbe1d951db4d5e1952c5c1bd264e443432402201b7d5469eb0252735c64d3361215cd7849d4b38a8655de48d6e3463a8760519f01210387fb76f2352dfcc94ce2fe6b6a5af86c70a07cacd422c9362d99b5827a211b4a0247304402203a928bf0291936697bb9462f5c75431e2fcdb888e904df329aaf53e4942187480220331a0f23cc6055537a2287e34ae974d77705e02580ef4d467f5c82fa8b58789e01210234446fb0f7bc2b53ac063672e15da59a62f029770d83400b9fd5ada38f0fefa9ea000000"
-wallet_depo_outpoint = OutPointWithTx(wallet_deposit_tx_hex, wallet.scriptPubkey)
+wallet_deposit_tx_hex = "020000000001011bcaa178b7474cb54d352c9cc257b520f88a26a3c64a0fb32f139a6c6f12ce1000000000171600140fd1a7567003391dc2f794fc72078fe309100657fdffffff0300ca9a3b0000000017a91400593b17f9ff1e272c0086b46ec4161de2e89b4387b418d0b20000000017a91487dc561b8ce369d4d738d2fcd8297e29ec1398be8710270000000000001976a914567827d4bedca8a476fc0d6ab47dad54ad52379688ac0247304402200e92ab18c321831d0311628d710064eb01284ad7b36ff370b81e05b69c23d554022022f733925438860ae0e42f53951ac29450e5bbd96b13bfc5a21f357dc32198bc01210321b60b99cc75039de4fa75247a987dcb805edbde8fd903f2e475314e80b3c17198000000"
+wallet_depo_outpoint = OutPointWithTx(wallet_deposit_tx_hex, wallet.scriptPubkey())
 
 # try accuse Alice
 life_signal, tx1, tx2 = wallet.accuse(dust_outpoint, wallet_depo_outpoint, 0, sgx_seckey)
+print('life signal redeem script: {}'.format(b2x(life_signal.redeemScript)))
 print('tx1 (hex):', b2x(tx1.serialize()))
 print('tx2 (hex):', b2x(tx2.serialize()))
 
