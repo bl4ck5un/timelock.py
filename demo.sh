@@ -14,8 +14,8 @@ fi
 
 echo "Using private key ${private_key}"
 
-time=$(date +%s)
-timelock=$(($time + 10))
+time="2024-02-06 12:00:00"
+timelock=$(date -jf "%Y-%m-%d %H:%M:%S" "$time" +%s)
 
 echo "Creating a P2SH address with a timelock ${timelock}"
 
@@ -23,6 +23,7 @@ p2shaddr=$(python3 hodl.py -t $private_key $timelock create)
 
 echo "address created: $p2shaddr"
 
+exit;
 sleep 2
 
 echo "sending 10 BTC -> $p2shaddr"
@@ -45,28 +46,3 @@ else
 fi
 
 echo "Done."
-
-print_cpp()
-{
-cat << EOF
-//===PASTE THIS INTO C++ CODE====
-const string sgxPrivKey = "$private_key";
-const uint32_t cltvTimeout = $timelock;
-const int nIn = $outpoint;
-
-// txid = $p2shtxid
-const string rawPrevTxP2SH = "$rawtx";
-// to generate rereference spend transaction
-// python3 hodl.py -vt $private_key $timelock spend $p2shtxid:$outpoint $address
-//===END OF PASTE THIS INTO C++ CODE====
-EOF
-}
-
-print_rust()
-{
-    echo "=== To generate the same spending transaction in p2sh-examples (rust), use the following command ==="
-    echo ./target/debug/cltv --locktime $timelock --secret $private_key spend --address $address --tx $rawtx
-}
-
-print_cpp
-print_rust
