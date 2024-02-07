@@ -12,7 +12,7 @@ import math
 
 import bitcoin.rpc
 from bitcoin.core import (
-        b2x, b2lx, lx,
+        b2x, b2lx, lx,x,
         str_money_value, COIN,
         COutPoint, CTxIn, CTxOut, CTransaction,
 )
@@ -22,6 +22,7 @@ from bitcoin.core.script import (
         SignatureHash, SIGHASH_ALL,
 )
 from bitcoin.wallet import P2SHBitcoinAddress, CBitcoinSecret, CBitcoinAddress
+from bitcoin.core.key import CPubKey
 
 parser = argparse.ArgumentParser(description="hodl your bitcoins with CHECKLOCKTIMEVERIFY")
 parser.add_argument('-v', action='store_true',
@@ -29,24 +30,23 @@ parser.add_argument('-v', action='store_true',
                     help='Verbose')
 parser.add_argument('-t', action='store_true',
                     dest='testnet',
+                    default=True,
                     help='Enable testnet')
-parser.add_argument('privkey', action='store',
-                    help='Private key')
 parser.add_argument('nLockTime', action='store', type=int,
                     help='nLockTime')
 subparsers = parser.add_subparsers(title='Subcommands',
                                    description='All operations are done through subcommands:')
 
-def hodl_redeemScript(privkey, nLockTime):
+def hodl_redeemScript(pubkey: CPubKey, nLockTime):
     return CScript([nLockTime, OP_NOP2, OP_DROP,
-                    privkey.pub, OP_CHECKSIG])
+                    pubkey, OP_CHECKSIG])
 
 def spend_hodl_redeemScript(privkey, nLockTime, unsigned_tx, n):
     """Spend a hodl output
 
     Returns the complete scriptSig
     """
-    redeemScript = hodl_redeemScript(privkey, nLockTime)
+    redeemScript = hodl_redeemScript(privkey.pub, nLockTime)
     logging.debug('redeemScript: %s' % b2x(redeemScript))
     sighash = SignatureHash(redeemScript, unsigned_tx, n, SIGHASH_ALL)
     logging.debug('sighash: %s' % b2x(sighash))
@@ -56,10 +56,17 @@ def spend_hodl_redeemScript(privkey, nLockTime, unsigned_tx, n):
 # ----- create -----
 parser_create = subparsers.add_parser('create',
         help='Create an address for hodling')
+parser_create.add_argument('pubkey', action='store',
+                    help='Public key')
 
 def create_command(args):
-    redeemScript = hodl_redeemScript(args.privkey, args.nLockTime)
+    args.pubkey = CPubKey(x(args.pubkey))
+
+    redeemScript = hodl_redeemScript(args.pubkey, args.nLockTime)
+    scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
+
     logging.debug('redeemScript: %s' % b2x(redeemScript))
+    logging.debug('scriptPubKey: %s' % b2x(scriptPubKey))
 
     addr = P2SHBitcoinAddress.from_redeemScript(redeemScript)
     print(addr)
@@ -70,6 +77,8 @@ parser_create.set_defaults(cmd_func=create_command)
 # ----- spend -----
 parser_spend = subparsers.add_parser('spend',
         help='Spend (all) your hodled coins')
+parser_spend.add_argument('privkey', action='store',
+                    help='Private key')
 parser_spend.add_argument('prevouts', nargs='+',
         metavar='txid:n',
         help='Transaction output')
@@ -79,8 +88,9 @@ parser_spend.add_argument('addr', action='store',
 
 def spend_command(args):
     args.addr = CBitcoinAddress(args.addr)
+    args.privkey = CBitcoinSecret(args.privkey)
 
-    redeemScript = hodl_redeemScript(args.privkey, args.nLockTime)
+    redeemScript = hodl_redeemScript(args.privkey.pub, args.nLockTime)
     scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
 
     logging.debug('redeemScript: %s' % b2x(redeemScript))
@@ -161,10 +171,10 @@ args.parser = parser
 if args.verbose:
     logging.root.setLevel('DEBUG')
 
-if args.testnet:
-    bitcoin.SelectParams('testnet')
+# if args.testnet:
+    # bitcoin.SelectParams('testnet')
 
-args.privkey = CBitcoinSecret(args.privkey)
+bitcoin.SelectParams('testnet')
 
 if not hasattr(args, 'cmd_func'):
     parser.error('No command specified')
