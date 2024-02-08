@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Based on code by Peter Todd <pete@petertodd.org>
+# A small part of code is from the CLTV example by Peter Todd <pete@petertodd.org>
 # This file is subject to the license terms in the LICENSE file found in the
 # top-level directory of this distribution.
 
