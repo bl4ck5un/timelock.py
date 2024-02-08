@@ -26,7 +26,7 @@ from bitcoin.core.script import (
 from bitcoin.wallet import P2SHBitcoinAddress, CBitcoinSecret, CBitcoinAddress
 from bitcoin.core.key import CPubKey
 
-parser = argparse.ArgumentParser(description="hodl your bitcoins with CHECKLOCKTIMEVERIFY")
+parser = argparse.ArgumentParser(description="retractable bitcoins with CHECKLOCKTIMEVERIFY")
 parser.add_argument('-v', action='store_true',
                     dest='verbose',
                     help='Verbose')
@@ -159,6 +159,7 @@ def build_tx(args, tx_nLockTime, signer):
     raw_tx = b2x(signed_tx.serialize())
     print(f"tx: {raw_tx}")
 
+
 # ----- create -----
 parser_create = subparsers.add_parser('create',
                                       help='Create an address for hodling')
@@ -244,10 +245,8 @@ args.parser = parser
 if args.verbose:
     logging.root.setLevel('DEBUG')
 
-# if args.testnet:
-#     bitcoin.SelectParams('testnet')
-
-bitcoin.SelectParams('testnet')
+if args.testnet:
+    bitcoin.SelectParams('testnet')
 
 args.sender_pubkey = CPubKey(x(args.sender_pubkey))
 args.receiver_pubkey = CPubKey(x(args.receiver_pubkey))

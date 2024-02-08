@@ -1,12 +1,11 @@
 timelock.py
 ===========
 
-Requirements: Python3, package `python-bitcoinlib` 
-
 `timelock.py` is a command line tool for creating "retractable" coins. 
 A "sender" can use this tool to send coins to a "receiver" with a specified 
 timeout, after which the sender can retract the coins.
 
+Requirements: Python3 (and package `python-bitcoinlib`), running Bitcon Core, `bitcoin-cli`.
 
 Synopsis
 ========
