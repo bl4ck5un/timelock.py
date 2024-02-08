@@ -17,6 +17,8 @@ from bitcoin.core import (
         COutPoint, CTxIn, CTxOut, CTransaction,
 )
 from bitcoin.core.script import (
+        OP_IF, OP_ELSE, OP_ENDIF,
+        OP_TRUE, OP_FALSE,
         OP_NOP2, OP_DROP, OP_CHECKSIG,
         CScript,
         SignatureHash, SIGHASH_ALL,
@@ -34,35 +36,56 @@ parser.add_argument('-t', action='store_true',
                     help='Enable testnet')
 parser.add_argument('nLockTime', action='store', type=int,
                     help='nLockTime')
+parser.add_argument('sender_pubkey', action='store',
+                    help='Sender Public key')
+parser.add_argument('receiver_pubkey', action='store',
+                    help='Receiver Public key')
 subparsers = parser.add_subparsers(title='Subcommands',
                                    description='All operations are done through subcommands:')
 
-def hodl_redeemScript(pubkey: CPubKey, nLockTime):
-    return CScript([nLockTime, OP_NOP2, OP_DROP,
-                    pubkey, OP_CHECKSIG])
+def timelock_redeemScript(sender_pubkey, receiver_pubkey, nLockTime):
+    # OP_IF <receiverkey>
+    # OP_ELSE nLockTime OP_NOP2 OP_DROP <senderkey>
+    # OP_ENDIF
+    # OP_CHECKSIG
 
-def spend_hodl_redeemScript(privkey, nLockTime, unsigned_tx, n):
-    """Spend a hodl output
+    # spend before timeout: script = <sig_receiver> OP_TRUE
+    # spend after timeout: script = <sig_sender> OP_FALSE
+    return CScript([OP_IF, receiver_pubkey,
+                    OP_ELSE, nLockTime, OP_NOP2, OP_DROP, sender_pubkey,
+                    OP_ENDIF, OP_CHECKSIG])
 
-    Returns the complete scriptSig
+def spend_by_receiver(sender_pubkey, receiver_privkey, nLockTime, unsigned_tx, n):
+    """Spend before timeout
+
+    Returns the complete scriptSig: <sig_receiver> OP_TRUE <redeemScript>
     """
-    redeemScript = hodl_redeemScript(privkey.pub, nLockTime)
+    redeemScript = timelock_redeemScript(sender_pubkey, receiver_privkey.pub, nLockTime)
     logging.debug('redeemScript: %s' % b2x(redeemScript))
     sighash = SignatureHash(redeemScript, unsigned_tx, n, SIGHASH_ALL)
     logging.debug('sighash: %s' % b2x(sighash))
-    sig = privkey.sign(sighash) + bytes([SIGHASH_ALL])
-    return CScript([sig, redeemScript])
+    sig = receiver_privkey.sign(sighash) + bytes([SIGHASH_ALL])
+    return CScript([sig, OP_TRUE, redeemScript])
+
+
+def spend_by_sender(sender_privkey, receiver_pubkey, nLockTime, unsigned_tx, n):
+    """Spend after timeout
+
+    Returns the complete scriptSig: <sig_sender> OP_FALSE <redeemScript>
+    """
+    redeemScript = timelock_redeemScript(sender_privkey.pub, receiver_pubkey, nLockTime)
+    logging.debug('redeemScript: %s' % b2x(redeemScript))
+    sighash = SignatureHash(redeemScript, unsigned_tx, n, SIGHASH_ALL)
+    logging.debug('sighash: %s' % b2x(sighash))
+    sig = sender_privkey.sign(sighash) + bytes([SIGHASH_ALL])
+    return CScript([sig, OP_FALSE, redeemScript])
 
 # ----- create -----
 parser_create = subparsers.add_parser('create',
         help='Create an address for hodling')
-parser_create.add_argument('pubkey', action='store',
-                    help='Public key')
 
 def create_command(args):
-    args.pubkey = CPubKey(x(args.pubkey))
-
-    redeemScript = hodl_redeemScript(args.pubkey, args.nLockTime)
+    redeemScript = timelock_redeemScript(args.sender_pubkey, args.receiver_pubkey, args.nLockTime)
     scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
 
     logging.debug('redeemScript: %s' % b2x(redeemScript))
@@ -87,10 +110,22 @@ parser_spend.add_argument('addr', action='store',
 
 
 def spend_command(args):
-    args.addr = CBitcoinAddress(args.addr)
     args.privkey = CBitcoinSecret(args.privkey)
+    args.addr = CBitcoinAddress(args.addr)
 
-    redeemScript = hodl_redeemScript(args.privkey.pub, args.nLockTime)
+    sigScriptF = None
+    nLockTime = 0
+    if args.privkey.pub == args.sender_pubkey:
+        sigScriptF = lambda unsigned_tx, n: spend_by_sender(args.privkey, args.receiver_pubkey, args.nLockTime, unsigned_tx, n)
+        nLockTime = args.nLockTime  # required by CLTV
+        print("spending as sender")
+    elif args.privkey.pub == args.receiver_pubkey:
+        sigScriptF = lambda unsigned_tx, n: spend_by_receiver(args.sender_pubkey, args.privkey, args.nLockTime, unsigned_tx, n)
+        print("spending as receiver")
+    else:
+        raise Exception("priv neither sender's or receiver's")
+
+    redeemScript = timelock_redeemScript(args.sender_pubkey, args.receiver_pubkey, args.nLockTime)
     scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
 
     logging.debug('redeemScript: %s' % b2x(redeemScript))
@@ -109,7 +144,6 @@ def spend_command(args):
             outpoint = COutPoint(txid, n)
         except ValueError:
             args.parser.error('Invalid output: %s' % prevout)
-
 
         try:
             prevout = proxy.gettxout(outpoint)
@@ -144,23 +178,26 @@ def spend_command(args):
         feerate = 10000
     fees = int(tx_size / 1000 * feerate)
 
+    if fees < 236: # to prevent  min relay fee not met, 198 < 236 (code -26)
+        fees = 250
+
     print('fee: %f' % fees)
     print('amount: %f' % (sum_in - fees))
 
     unsigned_tx = CTransaction([CTxIn(outpoint, nSequence=0) for outpoint, prevout in prevouts],
                                [CTxOut(sum_in - fees,
                                        args.addr.to_scriptPubKey())],
-                               args.nLockTime)
+                               nLockTime)
 
     signed_tx = CTransaction(
         [CTxIn(txin.prevout,
-               spend_hodl_redeemScript(args.privkey, args.nLockTime, unsigned_tx, i),
+               sigScriptF(unsigned_tx, i),
                nSequence=0)
             for i, txin in enumerate(unsigned_tx.vin)],
         unsigned_tx.vout,
         unsigned_tx.nLockTime)
 
-    print(b2x(signed_tx.serialize()))
+    print("tx: ", b2x(signed_tx.serialize()))
 
 parser_spend.set_defaults(cmd_func=spend_command)
 
@@ -175,6 +212,9 @@ if args.verbose:
     # bitcoin.SelectParams('testnet')
 
 bitcoin.SelectParams('testnet')
+
+args.sender_pubkey = CPubKey(x(args.sender_pubkey))
+args.receiver_pubkey = CPubKey(x(args.receiver_pubkey))
 
 if not hasattr(args, 'cmd_func'):
     parser.error('No command specified')
