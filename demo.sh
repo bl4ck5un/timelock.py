@@ -26,8 +26,8 @@ echo "Using private key ${private_key}"
 echo "Using public key ${public_key}"
 echo "Using pk2 ${pubkey2}"
 
-# time="2024-02-21 16:00:00"  # that's 11 am on Feb 21
-time="2024-02-08 16:00:00"  # that's 11 am on Feb 8
+# time="2024-02-21 11:00:00"  # that's 11 am on Feb 21
+time="2024-02-08 11:00:00"  # that's 11 am on Feb 8
 timelock=$(date -jf "%Y-%m-%d %H:%M:%S" "$time" +%s)
 
 echo "Creating a P2SH address with a timelock ${timelock} (${time})"
