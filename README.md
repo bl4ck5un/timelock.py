@@ -41,7 +41,7 @@ $ ./timelock.py 1707426000 02df7ec340931b4d039b205116d02fdd649af0094096fd2c9a32e
 ```
 
 This command returns a P2SH address `2MvfcVVEmVqBvThtsEHzpTUnmVDjFgRyWH7` corresponding
-to the above script with the given parameters.
+to the above script with the given parameters. (`1707426000` is a Unix timestamp for Thu Feb 08 2024 16:00:00 GMT-0500 (Eastern Standard Time).)
 
 ### To spend a timelocked coin as the receiver
 
