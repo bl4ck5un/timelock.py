@@ -83,14 +83,16 @@ def sign_by_sender(sender_privkey, receiver_pubkey, nLockTime, unsigned_tx, n):
     return CScript([sig, OP_FALSE, redeemScript])
 
 
+def fetch_utxo(raw_tx, output_idx):
+    tx = CTransaction.deserialize(bytes.fromhex(raw_tx))
+    return tx.vout[output_idx]
+
 def build_tx(args, tx_nLockTime, signer):
     redeemScript = timelock_redeemScript(args.sender_pubkey, args.receiver_pubkey, args.nLockTime)
     scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
 
     logging.debug('redeemScript: %s' % b2x(redeemScript))
     logging.debug('scriptPubKey: %s' % b2x(scriptPubKey))
-
-    proxy = bitcoin.rpc.Proxy()
 
     prevouts = []
     for prevout in args.prevouts:
@@ -104,12 +106,15 @@ def build_tx(args, tx_nLockTime, signer):
         except ValueError:
             args.parser.error('Invalid output: %s' % prevout)
 
-        try:
-            prevout = proxy.gettxout(outpoint)
-        except IndexError:
-            args.parser.error('Outpoint %s not found' % outpoint)
-
-        prevout = prevout['txout']
+        if args.rawtx:
+            prevout = fetch_utxo(args.rawtx, n)
+        else:
+            try:
+                proxy = bitcoin.rpc.Proxy()
+                prevout = proxy.gettxout(outpoint)
+                prevout = prevout['txout']
+            except IndexError:
+                args.parser.error('Outpoint %s not found' % outpoint)
         if prevout.scriptPubKey != scriptPubKey:
             args.parser.error('Outpoint scriptPubKey does not match')
 
@@ -125,16 +130,20 @@ def build_tx(args, tx_nLockTime, signer):
                4  # nLockTime field
                )
 
-    estimated_fee = proxy._call('estimatesmartfee', 1)
 
-    if 'errors' in estimated_fee:
-        print(estimated_fee['errors'])
-        feerate = -1
-    else:
-        feerate = int(estimated_fee['feerate'] * COIN)  # satoshi's per KB
+    # estimated_fee = proxy._call('estimatesmartfee', 1)
+    # if 'errors' in estimated_fee:
+    #     print(estimated_fee['errors'])
+    #     feerate = -1
+    # else:
+    #     feerate = int(estimated_fee['feerate'] * COIN)  # satoshi's per KB
+    #
+    # if feerate <= 0:
+    #     feerate = 10000
 
-    if feerate <= 0:
-        feerate = 10000
+    # 25 satoshi/B is a good estimate
+    # TODO: allow changes
+    feerate = 25000
     fees = int(tx_size / 1000 * feerate)
 
     if fees < 236:  # to prevent  min relay fee not met, 198 < 236 (code -26)
@@ -188,6 +197,8 @@ parser_spend.add_argument('prevouts', nargs='+',
                           help='Transaction output')
 parser_spend.add_argument('addr', action='store',
                           help='Address to send the funds to')
+parser_spend.add_argument('--rawtx',
+                          help='The raw tx from which UTXO can be extracted. Use this when RPC is not available.')
 
 
 def spend_command(args):
@@ -195,6 +206,8 @@ def spend_command(args):
     """
     args.privkey = CBitcoinSecret(args.privkey)
     args.addr = CBitcoinAddress(args.addr)
+
+    print(args.rawtx)
 
     sigScriptF = None
     nLockTime = 0
