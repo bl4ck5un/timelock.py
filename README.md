@@ -91,15 +91,15 @@ coins to `$addr`.
 You can send raw transactions using `bitcoin-cli sendrawtransaction` or using the Console tab in
 Bitcoin Core.
 
-#### (New Feature)
+#### New Feature: Spend without local Bitcoin Core or RPC
 
-I added a feature to timelock.py to support `spend` without RPC. You can supply the raw tx creating the UTXO you want to spend using the `--rawtx` option:
+You can run `spend` without running a Bitcoin Core client locally or using a remote RPC endpoint. This is handy, e.g., when you can't sync the full blockchain on your laptop. You need to supply the raw tx creating the UTXO you want to spend using the `--rawtx` option:
 
 ```
 usage: timelock.py nLockTime sender_pubkey receiver_pubkey spend [-h] [--rawtx RAWTX] privkey txid:n [txid:n ...] addr 
 ```
 
-Raw txns can be obtained from, e.g., https://mempool.space/testnet/api/tx/c985f4c8884580a05a21b54f1e7ba9a32dd13695179c4fc1ada095051fce820b/hex. Your final transactions can be sent via, e.g., https://blockstream.info/testnet/tx/push. This way you don't need any RPC end points, local or remote.
+Raw txns can be obtained from, e.g., https://mempool.space/testnet/api/tx/c985f4c8884580a05a21b54f1e7ba9a32dd13695179c4fc1ada095051fce820b/hex. Your final transactions can be sent via, e.g., https://blockstream.info/testnet/tx/push. This way, you don't need any RPC end points, local or remote.
 
 ### To retract
 
